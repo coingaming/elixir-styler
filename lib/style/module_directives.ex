@@ -216,7 +216,6 @@ defmodule Styler.Style.ModuleDirectives do
         {:dealiases, d} -> {:dealiases, d}
         {k, v} -> {k, Enum.reverse(v)}
       end)
-      |> lift_aliases()
 
     # Not happy with it, but this does the work to move module attribute assignments above the module or quote or whatever
     # Given that it'll only be run once and not again, i'm okay with it being inefficient
@@ -361,51 +360,6 @@ defmodule Styler.Style.ModuleDirectives do
     end)
     |> Enum.filter(&match?({_last, {_aliases, true}}, &1))
     |> MapSet.new(fn {_, {aliases, true}} -> aliases end)
-  end
-
-  defp do_lift_aliases(ast, to_alias) do
-    ast
-    |> Zipper.zip()
-    |> Zipper.traverse(fn
-      {{defx, _, [{:__aliases__, _, _} | _]}, _} = zipper when defx in ~w(defmodule defimpl defprotocol)a ->
-        # move the focus to the body block, zkipping over the alias (and the `for` keyword for `defimpl`)
-        zipper |> Zipper.down() |> Zipper.rightmost() |> Zipper.down() |> Zipper.down() |> Zipper.right()
-
-      {{:alias, _, [{:__aliases__, _, [_, _, _ | _] = aliases}]}, _} = zipper ->
-        # the alias was aliased deeper down. we've lifted that alias to a root, so delete this alias
-        if aliases in to_alias,
-          do: Zipper.remove(zipper),
-          else: zipper
-
-      {{:__aliases__, meta, [_, _, _ | _] = aliases}, _} = zipper ->
-        if aliases in to_alias,
-          do: Zipper.replace(zipper, {:__aliases__, meta, [List.last(aliases)]}),
-          else: zipper
-
-      zipper ->
-        zipper
-    end)
-    |> Zipper.node()
-  end
-
-  # Deletes root level aliases ala (`alias Foo` -> ``)
-  defp expand({:alias, _, [{:__aliases__, _, [_]}]}), do: []
-
-  # import Foo.{Bar, Baz}
-  # =>
-  # import Foo.Bar
-  # import Foo.Baz
-  defp expand({directive, _, [{{:., _, [{:__aliases__, _, module}, :{}]}, _, right}]}) do
-    Enum.map(right, fn {_, meta, segments} ->
-      {directive, meta, [{:__aliases__, [line: meta[:line]], module ++ segments}]}
-    end)
-  end
-
-  # alias __MODULE__.{Bar, Baz}
-  defp expand({directive, _, [{{:., _, [{:__MODULE__, _, _} = module, :{}]}, _, right}]}) do
-    Enum.map(right, fn {_, meta, segments} ->
-      {directive, meta, [{:__aliases__, [line: meta[:line]], [module | segments]}]}
-    end)
   end
 
   defp expand(other), do: [other]
