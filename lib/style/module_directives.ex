@@ -277,6 +277,26 @@ defmodule Styler.Style.ModuleDirectives do
     end
   end
 
+  # Deletes root level aliases ala (`alias Foo` -> ``)
+  defp expand({:alias, _, [{:__aliases__, _, [_]}]}), do: []
+
+  # import Foo.{Bar, Baz}
+  # =>
+  # import Foo.Bar
+  # import Foo.Baz
+  defp expand({directive, _, [{{:., _, [{:__aliases__, _, module}, :{}]}, _, right}]}) do
+    Enum.map(right, fn {_, meta, segments} ->
+      {directive, meta, [{:__aliases__, [line: meta[:line]], module ++ segments}]}
+    end)
+  end
+
+  # alias __MODULE__.{Bar, Baz}
+  defp expand({directive, _, [{{:., _, [{:__MODULE__, _, _} = module, :{}]}, _, right}]}) do
+    Enum.map(right, fn {_, meta, segments} ->
+      {directive, meta, [{:__aliases__, [line: meta[:line]], [module | segments]}]}
+    end)
+  end
+
   defp expand(other), do: [other]
 
   defp sort(directives) do

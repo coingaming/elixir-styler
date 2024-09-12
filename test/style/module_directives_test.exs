@@ -30,7 +30,132 @@ defmodule Styler.Style.ModuleDirectivesTest do
       """)
     end
 
+    test "module with single child" do
+      assert_style(
+        """
+        defmodule ATest do
+          alias Foo.{A, B}
+        end
+        """,
+        """
+        defmodule ATest do
+          alias Foo.A
+          alias Foo.B
+        end
+        """
+      )
+    end
 
+    test "adds moduledoc" do
+      assert_style(
+        """
+        defmodule A do
+        end
+        """,
+        """
+        defmodule A do
+          @moduledoc false
+        end
+        """
+      )
+
+      assert_style(
+        """
+        defmodule B do
+          defmodule C do
+          end
+        end
+        """,
+        """
+        defmodule B do
+          @moduledoc false
+          defmodule C do
+            @moduledoc false
+          end
+        end
+        """
+      )
+
+      assert_style(
+        """
+        defmodule Bar do
+          alias Bop.Bop
+
+          :ok
+        end
+        """,
+        """
+        defmodule Bar do
+          @moduledoc false
+          alias Bop.Bop
+
+          :ok
+        end
+        """
+      )
+
+      assert_style(
+        """
+        defmodule DocsOnly do
+          @moduledoc "woohoo"
+        end
+        """,
+        """
+        defmodule DocsOnly do
+          @moduledoc "woohoo"
+        end
+        """
+      )
+
+      assert_style(
+        """
+        defmodule Foo do
+          use Bar
+        end
+        """,
+        """
+        defmodule Foo do
+          @moduledoc false
+          use Bar
+        end
+        """
+      )
+
+      assert_style(
+        """
+        defmodule Foo do
+          alias Foo.{Bar, Baz}
+        end
+        """,
+        """
+        defmodule Foo do
+          @moduledoc false
+          alias Foo.Bar
+          alias Foo.Baz
+        end
+        """
+      )
+
+      assert_style(
+        """
+        defmodule A do
+          defmodule B do
+            :literal
+          end
+
+        end
+        """,
+        """
+        defmodule A do
+          @moduledoc false
+          defmodule B do
+            @moduledoc false
+            :literal
+          end
+        end
+        """
+      )
+    end
 
     test "skips keyword defmodules" do
       assert_style("defmodule Foo, do: use(Bar)")
@@ -143,7 +268,30 @@ defmodule Styler.Style.ModuleDirectivesTest do
       """)
     end
 
+    test "anonymous function" do
+      assert_style("fn -> alias A.{C, B} end", """
+      fn ->
+        alias A.B
+        alias A.C
+      end
+      """)
+    end
 
+    test "quote do with one child" do
+      assert_style(
+        """
+        quote do
+          alias A.{C, B}
+        end
+        """,
+        """
+        quote do
+          alias A.B
+          alias A.C
+        end
+        """
+      )
+    end
 
     test "quote do with multiple children" do
       assert_style("""
@@ -178,9 +326,94 @@ defmodule Styler.Style.ModuleDirectivesTest do
       assert_style("import Foo")
     end
 
+    test "sorts, dedupes & expands alias/require/import while respecting groups" do
+      for d <- ~w(alias require import) do
+        assert_style(
+          """
+          #{d} D.D
+          #{d} A.{B}
+          #{d} A.{
+            A.A,
+            B,
+            C
+          }
+          #{d} A.B
 
+          #{d} B.B
+          #{d} A.A
+          """,
+          """
+          #{d} A.A
+          #{d} A.A.A
+          #{d} A.B
+          #{d} A.C
+          #{d} B.B
+          #{d} D.D
+          """
+        )
+      end
+    end
 
+    test "expands __MODULE__" do
+      assert_style(
+        """
+        alias __MODULE__.{B.D, A}
+        """,
+        """
+        alias __MODULE__.A
+        alias __MODULE__.B.D
+        """
+      )
+    end
 
+    test "expands use but does not sort it" do
+      assert_style(
+        """
+        use D
+        use A
+        use A.{
+          C,
+          B
+        }
+        import F
+        """,
+        """
+        use D
+        use A
+        use A.C
+        use A.B
+
+        import F
+        """
+      )
+    end
+
+    test "interwoven directives w/o the context of a module" do
+      assert_style(
+        """
+        @type foo :: :ok
+        alias D.D
+        alias A.{B}
+        require A.{
+          A,
+          C
+        }
+        alias B.B
+        alias A.A
+        """,
+        """
+        alias A.A
+        alias A.B
+        alias B.B
+        alias D.D
+
+        require A.A
+        require A.C
+
+        @type foo :: :ok
+        """
+      )
+    end
 
     test "respects as" do
       assert_style("""
@@ -236,6 +469,48 @@ defmodule Styler.Style.ModuleDirectivesTest do
     end
   end
 
+  test "Deletes root level alias" do
+    assert_style("alias Foo", "")
+
+    assert_style(
+      """
+      alias Foo
+
+      Foo.bar()
+      """,
+      "Foo.bar()"
+    )
+
+    assert_style(
+      """
+      alias unquote(Foo)
+      alias Foo
+      alias Bar, as: Bop
+      alias __MODULE__
+      """,
+      """
+      alias __MODULE__
+      alias Bar, as: Bop
+      alias unquote(Foo)
+      """
+    )
+
+    assert_style(
+      """
+      alias A.A
+      alias B.B
+      alias C
+
+      require D
+      """,
+      """
+      alias A.A
+      alias B.B
+
+      require D
+      """
+    )
+  end
 
   test "@derive movements" do
     assert_style(
