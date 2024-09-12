@@ -12,9 +12,59 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
   @moduledoc false
   use Styler.StyleCase, async: true
 
+  test "lifts aliases repeated >=2 times from 3 deep" do
+    assert_style(
+      """
+      defmodule A do
+        @moduledoc false
 
+        @spec bar :: A.B.C.t()
+        def bar do
+          A.B.C.f()
+        end
+      end
+      """,
+      """
+      defmodule A do
+        @moduledoc false
 
+        @spec bar :: A.B.C.t()
+        def bar do
+          A.B.C.f()
+        end
+      end
+      """
+    )
+  end
 
+  test "does not lifts from nested modules" do
+    assert_style(
+      """
+      defmodule A do
+        @moduledoc false
+
+        defmodule B do
+          @moduledoc false
+
+          A.B.C.f()
+          A.B.C.f()
+        end
+      end
+      """,
+      """
+      defmodule A do
+        @moduledoc false
+
+        defmodule B do
+          @moduledoc false
+
+          A.B.C.f()
+          A.B.C.f()
+        end
+      end
+      """
+    )
+    end
 
   test "skips over quoted or odd aliases" do
     assert_style """
@@ -25,6 +75,86 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
     """
   end
 
+  test "no deep nesting of an alias" do
+    assert_style(
+      """
+      alias Foo.Bar.Baz
+
+      Baz.Bop.Boom.wee()
+      Baz.Bop.Boom.wee()
+
+      """,
+      """
+      alias Foo.Bar.Baz
+
+      Baz.Bop.Boom.wee()
+      Baz.Bop.Boom.wee()
+      """
+    )
+  end
+
+  test "does not lift in modules with only-child bodies" do
+    assert_style(
+      """
+      defmodule A do
+        def lift_me() do
+          A.B.C.foo()
+          A.B.C.baz()
+        end
+      end
+      """,
+      """
+      defmodule A do
+        @moduledoc false
+        def lift_me do
+          A.B.C.foo()
+          A.B.C.baz()
+        end
+      end
+      """
+    )
+  end
+
+
+  describe "comments stay put" do
+    test "comments before alias stanza" do
+      assert_style(
+        """
+        # Foo is my fave
+        import Foo
+
+        A.B.C.f()
+        A.B.C.f()
+        """,
+        """
+        # Foo is my fave
+        import Foo
+
+        A.B.C.f()
+        A.B.C.f()
+        """
+      )
+    end
+
+    test "comments after alias stanza" do
+      assert_style(
+        """
+        # Foo is my fave
+        require Foo
+
+        A.B.C.f()
+        A.B.C.f()
+        """,
+        """
+        # Foo is my fave
+        require Foo
+
+        A.B.C.f()
+        A.B.C.f()
+        """
+      )
+    end
+  end
 
   describe "it doesn't lift" do
     test "collisions with configured modules" do
@@ -107,7 +237,6 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
       end
       """
     end
-
 
     test "quoted sections" do
       assert_style """
