@@ -12,7 +12,7 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
   @moduledoc false
   use Styler.StyleCase, async: true
 
-  test "lifts aliases repeated >=2 times from 3 deep" do
+  test "does not lift aliases repeated >=2 times from 3 deep" do
     assert_style(
       """
       defmodule A do
