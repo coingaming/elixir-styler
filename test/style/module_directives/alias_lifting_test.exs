@@ -64,7 +64,7 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
       end
       """
     )
-    end
+  end
 
   test "skips over quoted or odd aliases" do
     assert_style """
@@ -114,7 +114,6 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
       """
     )
   end
-
 
   describe "comments stay put" do
     test "comments before alias stanza" do
