@@ -12,7 +12,7 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
   @moduledoc false
   use Styler.StyleCase, async: true
 
-  test "lifts aliases repeated >=2 times from 3 deep" do
+  test "does not lift aliases repeated >=2 times from 3 deep" do
     assert_style(
       """
       defmodule A do
@@ -28,18 +28,16 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
       defmodule A do
         @moduledoc false
 
-        alias A.B.C
-
-        @spec bar :: C.t()
+        @spec bar :: A.B.C.t()
         def bar do
-          C.f()
+          A.B.C.f()
         end
       end
       """
     )
   end
 
-  test "lifts from nested modules" do
+  test "does not lifts from nested modules" do
     assert_style(
       """
       defmodule A do
@@ -57,69 +55,11 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
       defmodule A do
         @moduledoc false
 
-        alias A.B.C
-
         defmodule B do
           @moduledoc false
 
-          C.f()
-          C.f()
-        end
-      end
-      """
-    )
-
-    # this isn't exactly _desired_ behaviour but i don't see a real problem with it.
-    # as long as we're deterministic that's alright. this... really should never happen in the real world.
-    assert_style(
-      """
-      defmodule A do
-        defmodule B do
           A.B.C.f()
           A.B.C.f()
-        end
-      end
-      """,
-      """
-      defmodule A do
-        @moduledoc false
-        alias A.B.C
-
-        defmodule B do
-          @moduledoc false
-          C.f()
-          C.f()
-        end
-      end
-      """
-    )
-  end
-
-  test "only deploys new aliases in nodes _after_ the alias stanza" do
-    assert_style(
-      """
-      defmodule Timely do
-        use A.B.C
-        def foo do
-          A.B.C.bop
-        end
-        import A.B.C
-        require A.B.C
-      end
-      """,
-      """
-      defmodule Timely do
-        @moduledoc false
-        use A.B.C
-
-        import A.B.C
-
-        alias A.B.C
-
-        require C
-
-        def foo do
-          C.bop()
         end
       end
       """
@@ -135,7 +75,7 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
     """
   end
 
-  test "deep nesting of an alias" do
+  test "no deep nesting of an alias" do
     assert_style(
       """
       alias Foo.Bar.Baz
@@ -146,15 +86,14 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
       """,
       """
       alias Foo.Bar.Baz
-      alias Foo.Bar.Baz.Bop.Boom
 
-      Boom.wee()
-      Boom.wee()
+      Baz.Bop.Boom.wee()
+      Baz.Bop.Boom.wee()
       """
     )
   end
 
-  test "lifts in modules with only-child bodies" do
+  test "does not lift in modules with only-child bodies" do
     assert_style(
       """
       defmodule A do
@@ -167,36 +106,10 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
       """
       defmodule A do
         @moduledoc false
-        alias A.B.C
-
         def lift_me do
-          C.foo()
-          C.baz()
+          A.B.C.foo()
+          A.B.C.baz()
         end
-      end
-      """
-    )
-  end
-
-  test "re-sorts requires after lifting" do
-    assert_style(
-      """
-      defmodule A do
-        require A.B.C
-        require B
-
-        A.B.C.foo()
-      end
-      """,
-      """
-      defmodule A do
-        @moduledoc false
-        alias A.B.C
-
-        require B
-        require C
-
-        C.foo()
       end
       """
     )
@@ -216,10 +129,8 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
         # Foo is my fave
         import Foo
 
-        alias A.B.C
-
-        C.f()
-        C.f()
+        A.B.C.f()
+        A.B.C.f()
         """
       )
     end
@@ -234,12 +145,11 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
         A.B.C.f()
         """,
         """
-        alias A.B.C
         # Foo is my fave
         require Foo
 
-        C.f()
-        C.f()
+        A.B.C.f()
+        A.B.C.f()
         """
       )
     end
@@ -320,74 +230,6 @@ defmodule Styler.Style.ModuleDirectives.AliasLiftingTest do
         defmodule C do
           @moduledoc false
           A.B.C.f()
-        end
-
-        A.B.C.f()
-      end
-      """
-    end
-
-    test "defprotocol, defmodule, or defimpl" do
-      assert_style """
-      defmodule No do
-        @moduledoc false
-
-        defprotocol A.B.C do
-          :body
-        end
-
-        A.B.C.f()
-      end
-      """
-
-      assert_style(
-        """
-        defmodule No do
-          @moduledoc false
-
-          defimpl A.B.C, for: A.B.C do
-            :body
-          end
-
-          A.B.C.f()
-          A.B.C.f()
-        end
-        """,
-        """
-        defmodule No do
-          @moduledoc false
-
-          alias A.B.C
-
-          defimpl A.B.C, for: A.B.C do
-            :body
-          end
-
-          C.f()
-          C.f()
-        end
-        """
-      )
-
-      assert_style """
-      defmodule No do
-        @moduledoc false
-
-        defmodule A.B.C do
-          @moduledoc false
-          :body
-        end
-
-        A.B.C.f()
-      end
-      """
-
-      assert_style """
-      defmodule No do
-        @moduledoc false
-
-        defimpl A.B.C, for: A.B.C do
-          :body
         end
 
         A.B.C.f()

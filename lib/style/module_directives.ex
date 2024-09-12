@@ -216,7 +216,6 @@ defmodule Styler.Style.ModuleDirectives do
         {:dealiases, d} -> {:dealiases, d}
         {k, v} -> {k, Enum.reverse(v)}
       end)
-      |> lift_aliases()
 
     # Not happy with it, but this does the work to move module attribute assignments above the module or quote or whatever
     # Given that it'll only be run once and not again, i'm okay with it being inefficient
@@ -276,116 +275,6 @@ defmodule Styler.Style.ModuleDirectives do
       |> Zipper.rightmost()
       |> Zipper.insert_siblings(nondirectives)
     end
-  end
-
-  defp lift_aliases(%{alias: aliases, require: requires, nondirectives: nondirectives} = acc) do
-    # we can't use the dealias map built into state as that's what things look like before sorting
-    # now that we've sorted, it could be different!
-    dealiases = AliasEnv.define(aliases)
-    excluded = dealiases |> Map.keys() |> Enum.into(Styler.Config.get(:lifting_excludes))
-    liftable = find_liftable_aliases(requires ++ nondirectives, excluded)
-
-    if Enum.any?(liftable) do
-      # This is a silly hack that helps comments stay put.
-      # The `cap_line` algo was designed to handle high-line stuff moving up into low line territory, so we set our
-      # new node to have an arbitrarily high line annnnd comments behave! i think.
-      m = [line: 999_999]
-
-      aliases =
-        liftable
-        |> Enum.map(&AliasEnv.expand(dealiases, {:alias, m, [{:__aliases__, [{:last, m} | m], &1}]}))
-        |> Enum.concat(aliases)
-        |> sort()
-
-      # lifting could've given us a new order
-      requires = requires |> do_lift_aliases(liftable) |> sort()
-      nondirectives = do_lift_aliases(nondirectives, liftable)
-      %{acc | alias: aliases, require: requires, nondirectives: nondirectives}
-    else
-      acc
-    end
-  end
-
-  defp find_liftable_aliases(ast, excluded) do
-    ast
-    |> Zipper.zip()
-    |> Zipper.reduce_while(%{}, fn
-      # we don't want to rewrite alias name `defx Aliases ... do` of these three keywords
-      {{defx, _, args}, _} = zipper, lifts when defx in ~w(defmodule defimpl defprotocol)a ->
-        # don't conflict with submodules, which elixir automatically aliases
-        # we could've done this earlier when building excludes from aliases, but this gets it done without two traversals.
-        lifts =
-          case args do
-            [{:__aliases__, _, aliases} | _] when defx == :defmodule ->
-              Map.put(lifts, List.last(aliases), :collision_with_submodule)
-
-            _ ->
-              lifts
-          end
-
-        # move the focus to the body block, zkipping over the alias (and the `for` keyword for `defimpl`)
-        {:skip, zipper |> Zipper.down() |> Zipper.rightmost() |> Zipper.down() |> Zipper.down(), lifts}
-
-      {{:quote, _, _}, _} = zipper, lifts ->
-        {:skip, zipper, lifts}
-
-      {{:__aliases__, _, [_, _, _ | _] = aliases}, _} = zipper, lifts ->
-        last = List.last(aliases)
-
-        lifts =
-          if last in excluded or not Enum.all?(aliases, &is_atom/1) do
-            lifts
-          else
-            Map.update(lifts, last, {aliases, false}, fn
-              {^aliases, _} -> {aliases, true}
-              # if we have `Foo.Bar.Baz` and `Foo.Bar.Bop.Baz` both not aliased, we'll create a collision by lifting both
-              # grouping by last alias lets us detect these collisions
-              _ -> :collision_with_last
-            end)
-          end
-
-        {:skip, zipper, lifts}
-
-      {{:__aliases__, _, [first | _]}, _} = zipper, lifts ->
-        # given:
-        #   C.foo()
-        #   A.B.C.foo()
-        #   A.B.C.foo()
-        #   C.foo()
-        #
-        # lifting A.B.C would create a collision with C.
-        {:skip, zipper, Map.put(lifts, first, :collision_with_first)}
-
-      zipper, lifts ->
-        {:cont, zipper, lifts}
-    end)
-    |> Enum.filter(&match?({_last, {_aliases, true}}, &1))
-    |> MapSet.new(fn {_, {aliases, true}} -> aliases end)
-  end
-
-  defp do_lift_aliases(ast, to_alias) do
-    ast
-    |> Zipper.zip()
-    |> Zipper.traverse(fn
-      {{defx, _, [{:__aliases__, _, _} | _]}, _} = zipper when defx in ~w(defmodule defimpl defprotocol)a ->
-        # move the focus to the body block, zkipping over the alias (and the `for` keyword for `defimpl`)
-        zipper |> Zipper.down() |> Zipper.rightmost() |> Zipper.down() |> Zipper.down() |> Zipper.right()
-
-      {{:alias, _, [{:__aliases__, _, [_, _, _ | _] = aliases}]}, _} = zipper ->
-        # the alias was aliased deeper down. we've lifted that alias to a root, so delete this alias
-        if aliases in to_alias,
-          do: Zipper.remove(zipper),
-          else: zipper
-
-      {{:__aliases__, meta, [_, _, _ | _] = aliases}, _} = zipper ->
-        if aliases in to_alias,
-          do: Zipper.replace(zipper, {:__aliases__, meta, [List.last(aliases)]}),
-          else: zipper
-
-      zipper ->
-        zipper
-    end)
-    |> Zipper.node()
   end
 
   # Deletes root level aliases ala (`alias Foo` -> ``)
